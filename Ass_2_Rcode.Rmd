@@ -1,0 +1,341 @@
+---
+title: "Group_Ass_2"
+author: "Group_3"
+date: "2024-10-30"
+output: html_document
+---
+
+```{r,warning=FALSE}
+library(fitdistrplus)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(readxl)
+```
+
+```{r,warning=FALSE}
+data <- read_excel("Patient_Data_2.xlsx")
+data
+```
+```{r}
+data <- data %>% 
+  mutate(Date_Started=as.Date(Date_Started),Date_Ended=as.Date(Date_Ended))
+data
+```
+
+# Over Viewing the Duration Column, Changing Numeric, and Using Absolute value for the delay days:
+```{r}
+data <- data %>% mutate(Duration=Date_Ended - Date_Started)
+data$Duration<-as.numeric(data$Duration)
+data<-data %>% mutate(Duration=abs(Duration))
+data
+```
+```{r}
+#Omitting Na values of Unnecessary rows
+data_1<- data %>% 
+  filter(!is.na(Date_Started)&!is.na(Date_Ended))
+View(data)
+```
+### Inspecting and Hundling Missing Values with Mean for Numeric Columns and Mode for non numeric columns:
+```{r}
+colSums(is.na(data_1))
+```
+```{r}
+# Function to calculate mode
+calculate_mode <- function(x) {
+  uniq_x <- unique(na.omit(x))
+  uniq_x[which.max(tabulate(match(x, uniq_x)))]
+}
+
+# Apply mean for numeric columns and mode for non-numeric columns
+data_2 <- data_1 %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .))) %>%
+  mutate(across(where(Negate(is.numeric)), ~ ifelse(is.na(.), calculate_mode(.), .)))
+
+```
+### Checking Missing Values after Imputation:
+```{r}
+colSums(is.na(data_2))
+```
+### Checking and Hundling Outliers:
+#### 1)Visualizing the Outliers with boxplot:
+```{r}
+ggplot(data_2,aes(y=Duration)) + geom_boxplot()
+```
+#### 2) Hundling Outliers with Lowerbound and Upperbounds If the distribution is naturally follows Normal Distribution: 
+But for now lets just use the dataset with outliers.
+```{r}
+# Calculate and cap outliers using ifelse
+data_3 <- data_2%>%
+  mutate(across(where(is.numeric), ~ {
+    iqr <- IQR(.x, na.rm = TRUE)
+    lower_bound <- quantile(.x, 0.25, na.rm = TRUE) - 1.5 * iqr
+    upper_bound <- quantile(.x, 0.75, na.rm = TRUE) + 1.5 * iqr
+    # Use ifelse to cap values to the lower and upper bounds
+    ifelse(.x < lower_bound, lower_bound, ifelse(.x > upper_bound, upper_bound, .x))
+  }))
+```
+#### 3) Visualizing after Hundling Outliers:
+
+```{r}
+ggplot(data_3,aes(y=Duration))+geom_boxplot()
+```
+### Visualizing the distribution of Patient Data Using histogram and Density Plot:
+Since we are not sure the type of distribution for our dataset lets skip to handle the outliers.
+
+```{r}
+# Step 1: Visualize the data
+ggplot(data_2, aes(x = Duration)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "lightblue", color = "black") +
+  geom_density(alpha = .2, fill = "red") +
+  labs(title = "Histogram and Density Plot of Patient data", x = "Duration", y = "Density") 
+```
+```{r}
+# Step 1: Visualize the data
+ggplot(data_2, aes(x = Duration)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "lightblue", color = "black") +
+  geom_density(color = "red",size=1) +
+  labs(title = "Histogram and Density Plot of Patient data", x = "Duration", y = "Density")
+```
+
+
+```{r}
+# Fit distributions
+fit_normal <- fitdist(data_2$Duration, "norm")
+fit_gamma <- fitdist(data_2$Duration, "gamma")
+fit_weibull <- fitdist(data_2$Duration, "weibull")
+fit_lognormal <- fitdist(data_2$Duration, "lnorm")
+fit_exponential <- fitdist(data_2$Duration, "exp")
+fit_cauchy <- fitdist(data_3$Duration, "cauchy")
+
+# Compare Goodness-of-Fit statistics
+gof <- gofstat(list(fit_normal, fit_gamma, fit_weibull, fit_lognormal, fit_exponential,fit_cauchy))
+# Print AIC and BIC values
+print(gof$aic)  # AIC values for each distribution
+print(gof$bic)  # BIC values for each distribution
+
+# Create a sequence of x values for plotting the fitted distributions
+x_values <- seq(min(data_2$Duration, na.rm = TRUE), max(data_2$Duration, na.rm = TRUE), length.out = 100)
+# Create histogram and density plot with fitted distributions
+ggplot(data_2, aes(x = Duration)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "lightblue", color = "black") +
+  
+  # Add density curve and include it in the legend
+  geom_density(aes(color = "Density"), size = 1) +
+  
+  # Add fitted distribution curves
+  stat_function(fun = dgamma, args = list(shape = fit_gamma$estimate["shape"], rate = fit_gamma$estimate["rate"]),
+                aes(color = "Gamma"), size = 1, linetype = "solid") +
+  stat_function(fun = dweibull, args = list(shape = fit_weibull$estimate["shape"], scale = fit_weibull$estimate["scale"]),
+                aes(color = "Weibull"), size = 1, linetype = "solid") +
+  stat_function(fun = dnorm, args = list(mean = fit_normal$estimate["mean"], sd = fit_normal$estimate["sd"]),
+                aes(color = "Normal"), size = 1, linetype = "solid") +
+  stat_function(fun = dlnorm, args = list(meanlog = fit_lognormal$estimate["meanlog"], sdlog = fit_lognormal$estimate["sdlog"]),
+                aes(color = "Lognormal"), size = 1, linetype = "solid") +
+  stat_function(fun = dexp, args = list(rate = 1 / mean(data_2$Duration, na.rm = TRUE)),
+                aes(color = "Exponential"), size = 1, linetype = "solid") +
+  
+  # Labels and theme adjustments
+  labs(title = "Histogram and Density Plot of Duration with Fitted Distributions",
+       x = "Duration", y = "Density") +
+  theme_minimal() +
+  
+  # Define legend colors
+  scale_color_manual("Distributions", 
+                     values = c("Density" = "red", "Gamma" = "black", "Normal" = "purple", 
+                                "Weibull" = "orange", "Lognormal" = "green", "Exponential" = "blue")) +
+  
+  theme(legend.position = "right", legend.title = element_text(size = 12))
+
+```
+
+### Fitting the patient data to Beta Distribution:
+```{r}
+# Ensure your Duration data is in the [0, 1] range
+data_2$Duration_normalized <- (data_2$Duration - min(data_2$Duration, na.rm = TRUE)) / 
+                              (max(data_2$Duration, na.rm = TRUE) - min(data_2$Duration, na.rm = TRUE))
+
+# Handling zeros and ones by adding a small value
+epsilon <- 1e-5
+data_2$Duration_normalized <- ifelse(data_2$Duration_normalized == 0, epsilon, data_2$Duration_normalized)
+data_2$Duration_normalized <- ifelse(data_2$Duration_normalized == 1, 1 - epsilon, data_2$Duration_normalized)
+
+# Fit Beta distribution
+fit_beta <- fitdist(data_2$Duration_normalized, "beta", start = list(shape1 = 1, shape2 = 1))
+summary(fit_beta)
+
+# Create a sequence of x values for plotting the fitted Beta distribution
+x_values <- seq(0, 1, length.out = 100)
+
+# Create histogram and density plot with Beta fit
+ggplot(data_2, aes(x = Duration_normalized)) +
+  geom_histogram(aes(y = ..density.. * 1.5), bins = 30, fill = "lightblue", color = "black") +  # Increase the height by a factor of 1.5
+  geom_density(color = "red", size = 1) +  # Density of the data
+  stat_function(fun = dbeta, 
+                args = list(shape1 = fit_beta$estimate["shape1"], shape2 = fit_beta$estimate["shape2"]),
+                color = "blue", size = 1, linetype = "solid") +  # Fitted Beta distribution
+  labs(title = "Histogram and Density Plot of Patients with Fitted Beta Distribution",
+       x = "Normalized Duration", y = "Density") +
+  theme_minimal()
+```
+
+
+
+```{r}
+# Fit T-distribution
+library(MASS)
+fit_t <- fitdistr(data_3$Duration, "t")
+
+# Plotting T-distribution
+ggplot(data_3, aes(x = Duration)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "steelblue", color = "white") +
+  geom_density(color = "red", size = 1) +
+  stat_function(fun = dt, args = list(df = fit_t$estimate["df"]),
+                color = "darkred", size = 1, linetype = "solid") +
+  labs(title = "Histogram and Density Plot with Fitted T-Distribution",
+       x = "Duration", y = "Density") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))  # Center the title
+
+```
+
+```{r}
+# Fit Cauchy distribution
+fit_cauchy <- fitdist(data_3$Duration, "cauchy")
+# Plotting Cauchy distribution
+ggplot(data_3, aes(x = Duration)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "steelblue", color = "white") +
+  geom_density(color = "red", size = 1) +
+  stat_function(fun = dcauchy, args = list(location = fit_cauchy$estimate["location"], scale = fit_cauchy$estimate["scale"]),
+                color = "darkred", size = 1, linetype = "solid") +
+  labs(title = "Histogram and Density Plot with Fitted Cauchy Distribution",
+       x = "Duration", y = "Density") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))  # Center the title
+```
+
+
+### Fitting the Pareto distribution Manually with the density plot:
+
+```{r}
+# 1. Define the Pareto PDF
+dpareto_manual <- function(x, shape, location) {
+  ifelse(x < location, 0, (shape * location^shape) / (x^(shape + 1)))
+}
+
+# 2. Calculate the MLE for the shape parameter
+pareto_mle_shape <- function(data) {
+  n <- length(data)
+  shape_mle <- n / sum(log(data / min(data)))  # MLE for shape
+  return(shape_mle)
+}
+
+# Calculate MLE for shape
+shape_mle <- pareto_mle_shape(data_2$Duration)
+
+# 3. Set the location parameter as the minimum value of the Duration data
+location_mle <- min(data_2$Duration, na.rm = TRUE)
+
+# Print the estimated parameters
+cat("Estimated shape parameter (MLE):", shape_mle, "\n")
+cat("Estimated location parameter (MLE):", location_mle, "\n")
+
+# 4. Create a sequence of x values for plotting the fitted distribution
+x_values <- seq(location_mle, max(data_2$Duration, na.rm = TRUE), length.out = 100)
+
+# 5. Create histogram and overlay the fitted Pareto distribution
+ggplot(data_2, aes(x = Duration)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "lightblue", color = "black") +
+  geom_density(color = "red", size = 1) +
+  stat_function(fun = dpareto_manual, 
+                args = list(shape = shape_mle, location = location_mle),
+                color = "green", size = 1, linetype = "solid") +
+  labs(title = "Histogram and Fitted Pareto Distribution",
+       x = "Duration", y = "Density") +
+  theme_minimal()
+```
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(fitdistrplus)
+
+# Ensure your Duration data is in the [0, 1] range
+data_2$Duration_normalized <- (data_2$Duration - min(data_2$Duration, na.rm = TRUE)) / 
+                              (max(data_2$Duration, na.rm = TRUE) - min(data_2$Duration, na.rm = TRUE))
+
+# Handling zeros and ones by adding a small value
+epsilon <- 1e-5
+data_2$Duration_normalized <- ifelse(data_2$Duration_normalized == 0, epsilon, data_2$Duration_normalized)
+data_2$Duration_normalized <- ifelse(data_2$Duration_normalized == 1, 1 - epsilon, data_2$Duration_normalized)
+
+# Fit Beta distribution
+fit_beta <- fitdist(data_2$Duration_normalized, "beta", start = list(shape1 = 1, shape2 = 1))
+summary(fit_beta)
+
+# Create a sequence of x values for plotting the fitted Beta distribution
+x_values <- seq(0, 1, length.out = 100)
+
+# Create histogram and density plot with Beta fit
+ggplot(data_2, aes(x = Duration_normalized)) +
+  geom_histogram(aes(y = ..density.. * 1.5), bins = 30, fill = "lightblue", color = "black") +  # Increase the height by a factor of 1.5
+  geom_density(color = "red", size = 1) +  # Density of the data
+  
+  stat_function(fun = dbeta, 
+                args = list(shape1 = fit_beta$estimate["shape1"], shape2 = fit_beta$estimate["shape2"]),
+                color = "blue", size = 1, linetype = "solid") +  # Fitted Beta distribution
+  labs(title = "Histogram and Density Plot of Patients with Fitted Beta Distribution",
+       x = "Normalized Duration", y = "Density") +
+  theme_minimal()
+
+```
+```{r}
+# Load necessary libraries
+library(fitdistrplus)  # Ensure this library is loaded for fitdist
+library(dplyr)
+
+# Function to extract relevant statistics including log-likelihood
+get_summary <- function(fit) {
+  c(AIC = fit$aic, BIC = fit$bic, 
+    logLik = logLik(fit),  # Extract log-likelihood
+    mean = ifelse("mean" %in% names(fit$estimate), fit$estimate["mean"], NA),
+    sd = ifelse("sd" %in% names(fit$estimate), fit$estimate["sd"], NA),
+    shape = ifelse("shape" %in% names(fit$estimate), fit$estimate["shape"], NA),
+    scale = ifelse("scale" %in% names(fit$estimate), fit$estimate["scale"], NA),
+    meanlog = ifelse("meanlog" %in% names(fit$estimate), fit$estimate["meanlog"], NA),
+    sdlog = ifelse("sdlog" %in% names(fit$estimate), fit$estimate["sdlog"], NA),
+    shape1 = ifelse("shape1" %in% names(fit$estimate), fit$estimate["shape1"], NA),
+    shape2 = ifelse("shape2" %in% names(fit$estimate), fit$estimate["shape2"], NA)
+  )
+}
+
+# Collect summaries for all fitted distributions
+summary_stats <- data.frame(
+  Distribution = c("Normal", "Gamma", "Weibull", "Lognormal", "Exponential", "Beta", "Pareto"),
+  rbind(
+    get_summary(fit_normal),
+    get_summary(fit_gamma),
+    get_summary(fit_weibull),
+    get_summary(fit_lognormal),
+    get_summary(fit_exponential),
+    get_summary(fit_beta),  # Assuming fit_beta is fitted
+    c(AIC = NA, BIC = NA, 
+      logLik = logLik_pareto,  # Replace with the calculated log-likelihood for Pareto
+      mean = location_mle,      # Location for Pareto
+      sd = NA,                  # No standard deviation for Pareto
+      shape = shape_mle,        # Shape for Pareto
+      scale = NA,               # No scale for Pareto
+      meanlog = NA,
+      sdlog = NA,
+      shape1 = NA,
+      shape2 = NA)
+  )
+)
+
+# Print the summary statistics
+print(summary_stats)
+
+```
+
+
+
+
